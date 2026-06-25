@@ -3494,6 +3494,8 @@ async function confirmRestore(filename) {
   }
 }
 
+const _isCloudMode = !['localhost', '127.0.0.1'].includes(location.hostname) && location.protocol !== 'file:';
+
 async function init() {
   loadState();
   updateCloudStatus();
@@ -5374,7 +5376,6 @@ function publishSignal() {
 
 // ─── Cloud Sync · GitHub Gist + AES-GCM 加密 ────────────────────────────
 const _cloudCfgKey = 'ft2_cloud';
-const _isCloudMode = !['localhost', '127.0.0.1'].includes(location.hostname) && location.protocol !== 'file:';
 
 function cloudGetCfg() {
   try { return JSON.parse(localStorage.getItem(_cloudCfgKey) || '{}'); } catch { return {}; }
@@ -5392,13 +5393,20 @@ async function _cloudKey(password) {
     km, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
   );
 }
+function _u8ToBase64(buf) {
+  let binary = '';
+  const chunk = 8192;
+  for (let i = 0; i < buf.length; i += chunk)
+    binary += String.fromCharCode(...buf.subarray(i, i + chunk));
+  return btoa(binary);
+}
 async function cloudEncrypt(plaintext, password) {
   const key = await _cloudKey(password);
   const iv  = crypto.getRandomValues(new Uint8Array(12));
   const ct  = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plaintext));
   const buf = new Uint8Array(12 + ct.byteLength);
   buf.set(iv); buf.set(new Uint8Array(ct), 12);
-  return btoa(String.fromCharCode(...buf));
+  return _u8ToBase64(buf);
 }
 async function cloudDecrypt(b64, password) {
   const key = await _cloudKey(password);
