@@ -937,6 +937,14 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <input class="form-control" id="cloudPassword" type="password" placeholder="自定义密码，两端必须一致" autocomplete="new-password">
         <div style="font-size:11px;color:var(--muted);margin-top:4px">密码丢失则无法解密已存储数据，请妥善保管</div>
       </div>
+      <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:12px">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px">📱 手机端快速配置：在 Mac 上生成配置码，复制到手机端粘贴即可自动填充</div>
+        <div style="display:flex;gap:8px">
+          <input class="form-control" id="cloudConfigCode" placeholder="粘贴配置码…" style="flex:1;font-size:12px" autocomplete="off">
+          <button class="btn btn-ghost btn-sm" onclick="cloudImportCode()" style="white-space:nowrap">导入</button>
+          <button class="btn btn-ghost btn-sm" onclick="cloudExportCode()" style="white-space:nowrap">生成</button>
+        </div>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost btn-sm" onclick="closeModal('modalCloudSetup')">取消</button>
@@ -5447,12 +5455,19 @@ async function cloudPull() {
     const res = await fetch(`https://api.github.com/gists/${cfg.gistId}`, {
       headers: { 'Authorization': `token ${cfg.token}` }
     });
-    if (!res.ok) return false;
+    if (res.status === 401) throw new Error('Token 无效，请检查设置');
+    if (res.status === 404) throw new Error('Gist ID 不存在，请检查设置');
+    if (!res.ok) throw new Error(`网络错误 ${res.status}`);
     const gist    = await res.json();
     const content = gist.files['data.json']?.content;
     if (!content || content.trim() === '{}') return false;
-    const decrypted = await cloudDecrypt(content, cfg.password);
-    const data      = JSON.parse(decrypted);
+    let decrypted;
+    try {
+      decrypted = await cloudDecrypt(content, cfg.password);
+    } catch {
+      throw new Error('解密失败，请确认加密密码与推送时一致');
+    }
+    const data = JSON.parse(decrypted);
     if (!data.state) return false;
     state    = data.state;
     navCache = data.navCache || navCache;
@@ -5462,6 +5477,7 @@ async function cloudPull() {
     cloudSaveCfg(cfg);
     return true;
   } catch(e) {
+    toast('❌ ' + e.message, 'error');
     console.warn('[cloud] pull failed', e);
     return false;
   }
@@ -5500,6 +5516,30 @@ function closeCloudMenuOutside(e) {
   if (!document.getElementById('cloudBtnWrap')?.contains(e.target)) closeCloudMenu();
 }
 
+function cloudExportCode() {
+  const token    = document.getElementById('cloudToken').value.trim();
+  const gistId   = document.getElementById('cloudGistId').value.trim();
+  const password = document.getElementById('cloudPassword').value.trim();
+  if (!token || !gistId || !password) { alert('请先填写三项配置再生成配置码'); return; }
+  const code = btoa(JSON.stringify({ token, gistId, password }));
+  document.getElementById('cloudConfigCode').value = code;
+  navigator.clipboard?.writeText(code).then(() => toast('✅ 配置码已复制，粘贴到手机端导入', 'success'))
+    .catch(() => toast('配置码已生成，请手动复制上方文本框内容', 'info'));
+}
+function cloudImportCode() {
+  const code = document.getElementById('cloudConfigCode').value.trim();
+  if (!code) { alert('请先粘贴配置码'); return; }
+  try {
+    const { token, gistId, password } = JSON.parse(atob(code));
+    if (!token || !gistId || !password) throw new Error();
+    document.getElementById('cloudToken').value    = token;
+    document.getElementById('cloudGistId').value   = gistId;
+    document.getElementById('cloudPassword').value = password;
+    toast('✅ 配置码导入成功，点保存设置生效', 'success');
+  } catch {
+    alert('配置码无效，请重新生成');
+  }
+}
 function openCloudSetupModal() {
   const cfg = cloudGetCfg();
   document.getElementById('cloudToken').value    = cfg.token    || '';
